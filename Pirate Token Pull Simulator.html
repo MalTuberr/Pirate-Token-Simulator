@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pirate Token Pull Simulator</title>
+<style>
+  :root { color-scheme: dark; --bg:#10131b; --panel:#1a2030; --panel2:#222b3e; --text:#f4f6fb; --muted:#aab4c7; --accent:#79a8ff; --green:#62d6a3; --border:#303b52; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:28px 16px 50px; background:radial-gradient(ellipse at top,#1b2940 0%,var(--bg) 58%); color:var(--text); font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  main { max-width:980px; margin:auto; }
+  h1 { margin:0 0 6px; font-size:clamp(27px,5vw,42px); letter-spacing:-1px; }
+  .sub { color:var(--muted); margin:0 0 24px; }
+  .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:20px 0; }
+  .card,.panel { background:rgba(26,32,48,.94); border:1px solid var(--border); border-radius:16px; padding:18px; box-shadow:0 10px 30px #0002; }
+  .stat-label { color:var(--muted); font-size:13px; text-transform:uppercase; letter-spacing:.08em; }
+  .stat { font-size:clamp(25px,4vw,35px); font-weight:750; margin-top:4px; overflow-wrap:anywhere; }
+  .panel { margin-top:14px; }
+  h2 { margin:0 0 12px; font-size:20px; }
+  .person { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; }
+  .person-name { font-size:21px; font-weight:700; }
+  .count { color:var(--green); font-weight:800; font-variant-numeric:tabular-nums; font-size:clamp(26px,5vw,40px); }
+  .actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:16px; }
+  button { border:0; border-radius:10px; padding:11px 16px; color:#08111f; background:var(--accent); font-weight:750; font-size:14px; cursor:pointer; }
+  button.secondary { color:var(--text); background:var(--panel2); border:1px solid var(--border); }
+  button.green { background:var(--green); }
+  button.danger { color:#ffdede; background:#572d39; border:1px solid #814253; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  .progress-wrap { height:9px; background:#0e1420; border-radius:99px; overflow:hidden; margin-top:14px; }
+  .progress { height:100%; width:0%; background:linear-gradient(90deg,var(--accent),var(--green)); transition:width .12s; }
+  .muted { color:var(--muted); font-size:13px; }
+  .table-wrap { overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; min-width:420px; }
+  th,td { text-align:left; padding:11px 9px; border-bottom:1px solid var(--border); }
+  th { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.06em; }
+  td:last-child, th:last-child { text-align:right; }
+  .empty { color:var(--muted); text-align:center; padding:24px 8px; }
+  .notice { color:var(--muted); font-size:13px; margin-top:14px; }
+  @media(max-width:650px) { .grid { grid-template-columns:1fr; } body { padding-top:20px; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Pirate token pull simulator</h1>
+
+  <section class="grid">
+    <div class="card"><div class="stat-label">Tokens Pulled</div><div class="stat" id="peopleStat">0</div></div>
+    <div class="card"><div class="stat-label">Average chests</div><div class="stat" id="averageStat">—</div></div>
+    <div class="card"><div class="stat-label">Total chests opened</div><div class="stat" id="totalStat">0</div></div>
+  </section>
+
+  <section class="panel">
+    <h2>Current person</h2>
+    <div class="person">
+      <div>
+        <div class="person-name" id="personName">Person 1</div>
+        <div class="muted" id="personStatus">Ready to start</div>
+      </div>
+      <div class="count" id="currentCount">0</div>
+    </div>
+    <div class="progress-wrap"><div class="progress" id="progress"></div></div>
+    <div class="muted" style="margin-top:7px">Progress toward the expected 137,500-roll mark (visual guide only)</div>
+    <div class="actions">
+      <button class="green" id="rollBtn">Roll once</button>
+      <button id="autoBtn">Auto-roll until hit</button>
+      <button class="secondary" id="newBtn" disabled>New person</button>
+      <button class="secondary" id="stopBtn" disabled>Pause auto-roll</button>
+    </div>
+    <p class="notice">Each roll has a 1 in 137,500 chance of success. Auto-roll runs trials quickly in batches; it stops immediately when the target is hit.</p>
+  </section>
+
+  <section class="panel">
+    <div class="person">
+      <h2 style="margin:0">Completed people</h2>
+      <div class="actions" style="margin:0">
+        <button class="secondary" id="csvBtn">Export CSV</button>
+        <button class="danger" id="resetBtn">Clear</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Person</th><th>Chests opened</th></tr></thead>
+        <tbody id="resultsBody"><tr><td colspan="2" class="empty">No completed people yet.</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+  <p class="notice">Your results are saved automatically in this browser on this device. Clearing browser site data or using a different browser/device may remove or hide the saved results. Export a CSV backup to keep a copy.</p>
+</main>
+<script>
+(() => {
+  const ODDS = 137500;
+  const STORAGE_KEY = "oneIn137500Simulator_v1";
+  const $ = id => document.getElementById(id);
+  let completed = [];
+  let current = 0;
+  let running = false;
+  let runToken = 0;
+
+  function load() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+      completed = Array.isArray(saved.completed) ? saved.completed.filter(x => Number.isSafeInteger(x) && x > 0) : [];
+      current = Number.isSafeInteger(saved.current) && saved.current >= 0 ? saved.current : 0;
+    } catch { completed = []; current = 0; }
+  }
+  function save() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({completed, current}));
+  }
+  function randomHit() {
+    // Uniform integer from 1 through ODDS; the target is exactly ODDS.
+    return Math.floor(Math.random() * ODDS) + 1 === ODDS;
+  }
+  function totalRolls() { return completed.reduce((sum, n) => sum + n, 0) + current; }
+  function render() {
+    $("peopleStat").textContent = completed.length.toLocaleString();
+    $("averageStat").textContent = completed.length
+      ? Math.round(completed.reduce((a,b) => a+b, 0) / completed.length).toLocaleString()
+      : "—";
+    $("totalStat").textContent = totalRolls().toLocaleString();
+    $("personName").textContent = `Person ${completed.length + 1}`;
+    $("currentCount").textContent = current.toLocaleString();
+    $("personStatus").textContent = running ? "Auto-rolling…" : "Ready / paused";
+    $("progress").style.width = Math.min(100, current / ODDS * 100) + "%";
+    $("rollBtn").disabled = running;
+    $("autoBtn").disabled = running;
+    $("newBtn").disabled = running || current === 0;
+    $("stopBtn").disabled = !running;
+    const body = $("resultsBody");
+    if (!completed.length) {
+      body.innerHTML = '<tr><td colspan="2" class="empty">No completed people yet.</td></tr>';
+    } else {
+      body.innerHTML = completed.map((n,i) => `<tr><td>Person ${i+1}</td><td>${n.toLocaleString()}</td></tr>`).join("");
+    }
+  }
+  function rollOne() {
+    current++;
+    if (randomHit()) finishPerson();
+    else { save(); render(); }
+  }
+  function finishPerson() {
+    completed.push(current);
+    current = 0;
+    save();
+    render();
+    $("personStatus").textContent = `Hit! Person ${completed.length} finished.`;
+  }
+  async function autoRoll() {
+    if (running) return;
+    running = true;
+    const token = ++runToken;
+    render();
+    while (running && token === runToken) {
+      // Batch work to keep the page responsive while still simulating every roll.
+      for (let i = 0; i < 5000 && running && token === runToken; i++) {
+        current++;
+        if (randomHit()) {
+          finishPerson();
+          running = false;
+          break;
+        }
+      }
+      if (running) {
+        save();
+        render();
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+    }
+    running = false;
+    save();
+    render();
+  }
+  $("rollBtn").addEventListener("click", rollOne);
+  $("autoBtn").addEventListener("click", autoRoll);
+  $("stopBtn").addEventListener("click", () => { running = false; runToken++; save(); render(); });
+  $("newBtn").addEventListener("click", () => {
+    if (running || current === 0) return;
+    if (!confirm("Discard this unfinished person's roll count and start a new person?")) return;
+    current = 0; save(); render();
+  });
+  $("resetBtn").addEventListener("click", () => {
+    if (!confirm("Delete all saved people and roll counts? This cannot be undone unless you exported a CSV.")) return;
+    running = false; runToken++; completed = []; current = 0; save(); render();
+  });
+  $("csvBtn").addEventListener("click", () => {
+    const rows = ["Person,Chests opened", ...completed.map((n,i) => `Person ${i+1},${n}`)];
+    rows.push("", `Average,${completed.length ? completed.reduce((a,b)=>a+b,0)/completed.length : ""}`);
+    const blob = new Blob([rows.join("\r\n")], {type:"text/csv;charset=utf-8"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = "pirate-token-pull-results.csv"; a.click();
+    URL.revokeObjectURL(url);
+  });
+  load(); render();
+})();
+</script>
+</body>
+</html>
